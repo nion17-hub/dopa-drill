@@ -1,0 +1,31 @@
+{
+  "name": "ДопаДрилл",
+  "short_name": "ДопаДрилл",
+  "description": "Тренажёр устного и письменного счёта для 1–4 классов",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "lang": "ru",
+  "theme_color": "#3b6bff",
+  "background_color": "#fff8ee",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
