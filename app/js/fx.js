@@ -7,6 +7,7 @@ export const COLORS = ['#ff7ab6', '#3b6bff', '#ffd23f', '#3fdcb0', '#a77bff', '#
 const PAPER = ['#ff7ab6', '#3b6bff', '#ffd23f', '#ffffff', '#3fdcb0'];
 const INK = '#1b1d4d';
 const SPRITES = new Map();
+let MINI_SPRITES = null;
 
 export class FX {
   constructor(canvas, max = 400) {
@@ -16,14 +17,20 @@ export class FX {
     this.parts = [];
     this.reduced = false;
     this.motion = 1;
+    this._dirty = false;
     // Unlockable particle theme (id041, id042): replaces part of the confetti.
     this.theme = null;
-    this.sprites = ['pink', 'blue', 'yellow', 'mint', 'violet'].map((p) => dopakichiSprite(p, 96));
+    if (!MINI_SPRITES) MINI_SPRITES = ['pink', 'blue', 'yellow', 'mint', 'violet'].map((p) => dopakichiSprite(p, 96));
+    this.sprites = MINI_SPRITES;
   }
   resize() {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const maxDpr = Math.sqrt(950000 / Math.max(1, innerWidth * innerHeight));
+    const dpr = Math.max(0.75, Math.min(2, window.devicePixelRatio || 1, maxDpr));
     const w = Math.round(innerWidth * dpr); const h = Math.round(innerHeight * dpr);
-    if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+      this.canvas.width = w; this.canvas.height = h;
+      this._dirty = false;
+    }
     this.dpr = dpr;
   }
   add(p) {
@@ -45,7 +52,7 @@ export class FX {
       if (kind === 'spark') { p.life = rand(0.35, 0.7); p.g = 300 * gravity; p.drag = 2.4; p.color = pick(['#fff', '#ffe98a', '#ffd23f', '#ff9ccc']); }
       if (kind === 'star') { p.life = rand(0.8, 1.4); p.g = 500 * gravity; p.drag = 1.6; p.color = pick(['#ffd23f', '#fff', '#ff9ccc', '#8fd3ff']); }
       if (kind === 'coin') { p.life = rand(1.4, 2.2); p.g = 1300 * gravity; p.drag = 0.4; }
-      if (kind === 'mini') { p.life = rand(1.6, 2.4); p.g = 900 * gravity; p.drag = 0.5; p.sprite = pick(this.sprites); p.vr = rand(-6, 6); p.size = size * rand(0.8, 1.2); }
+      if (kind === 'mini') { const idx = Math.floor(Math.random() * this.sprites.length); p.life = rand(1.6, 2.4); p.g = 900 * gravity; p.drag = 0.5; p.sprite = this.sprites[idx]; p.spriteIdx = idx; p.vr = rand(-6, 6); p.size = size * rand(0.8, 1.2); }
       if (kind === 'heart') { p.life = rand(1, 1.6); p.g = -80; p.drag = 1.8; p.color = pick(['#ff3f8e', '#ff7ab6']); }
       THEME_INIT[kind] && THEME_INIT[kind](p);
       p.life *= life;
@@ -76,14 +83,16 @@ export class FX {
     for (let i = 0; i < this.scale(n); i++) {
       const kind = this.themed(pick(kinds));
       const p = { kind, x: rand(0, W), y: rand(-160, -10), vx: rand(-60, 60), vy: rand(60, 260), rot: rand(0, 6), vr: rand(-8, 8), flip: rand(0, 6), vf: rand(5, 12), color: pick(PAPER), size: rand(0.8, 1.3), life: rand(2.5, 4), g: 120, drag: 0.6 };
-      if (kind === 'mini') { p.sprite = pick(this.sprites); p.size = rand(0.6, 1.1); p.g = 260; }
+      if (kind === 'mini') { const idx = Math.floor(Math.random() * this.sprites.length); p.sprite = this.sprites[idx]; p.spriteIdx = idx; p.size = rand(0.6, 1.1); p.g = 260; }
       THEME_INIT[kind] && THEME_INIT[kind](p);
       this.add(p);
     }
   }
 
   update(dt) {
+    if (!this.parts.length) return;
     const H = innerHeight + 200;
+    let hasDead = false;
     for (const p of this.parts) {
       p.age += dt;
       if (p.kind === 'shell') {
@@ -93,7 +102,7 @@ export class FX {
         p.x = p.x + (p.tx - p.x) * Math.min(1, dt * 8);
         p.y = innerHeight + 20 + (p.ty - innerHeight - 20) * ease;
         if (k >= 1 && !p.done) {
-          p.done = true; p.life = 0;
+          p.done = true; p.life = 0; hasDead = true;
           const col = p.color; const n = 46;
           for (let i = 0; i < this.scale(n); i++) {
             const a = (i / n) * Math.PI * 2; const v = rand(260, 330);
@@ -111,8 +120,16 @@ export class FX {
       if (p.flip !== undefined) p.flip += (p.vf || 0) * dt;
       if (p.trail) { p.trail.push({ x: p.x, y: p.y }); if (p.trail.length > 18) p.trail.shift(); }
       if (p.y > H) p.life = 0;
+      if (p.age >= p.life) hasDead = true;
     }
-    this.parts = this.parts.filter((p) => p.age < p.life || (p.kind === 'shell' && !p.done));
+    if (hasDead) {
+      let j = 0;
+      for (let i = 0; i < this.parts.length; i++) {
+        const p = this.parts[i];
+        if (p.age < p.life || (p.kind === 'shell' && !p.done)) this.parts[j++] = p;
+      }
+      this.parts.length = j;
+    }
   }
 
   sprite(key, w, h, paint) {
@@ -139,6 +156,15 @@ export class FX {
   }
 
   draw() {
+    if (!this.parts.length) {
+      if (!this._dirty) return;
+      this.resize();
+      this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      this._dirty = false;
+      return;
+    }
+    this._dirty = true;
     this.resize();
     const c = this.ctx; const dpr = this.dpr;
     c.setTransform(1, 0, 0, 1, 0, 0);
@@ -182,7 +208,7 @@ export class FX {
         case 'mini': {
           if (!p.sprite.complete) break;
           const s = 64 * p.size;
-          const spr = this.sprite(`mini${this.sprites.indexOf(p.sprite)}`, 64, 60, (g) => { g.drawImage(p.sprite, -32, -30, 64, 60); });
+          const spr = this.sprite(`mini${p.spriteIdx ?? this.sprites.indexOf(p.sprite)}`, 64, 60, (g) => { g.drawImage(p.sprite, -32, -30, 64, 60); });
           this.stamp(spr, p.x, p.y, p.rot, s / 64, s / 64, fade); break;
         }
         case 'ring': {
@@ -193,13 +219,24 @@ export class FX {
           break;
         }
         case 'text': {
+          if (!p._spr) {
+            const cv = document.createElement('canvas');
+            const k2 = 2;
+            const m = cv.getContext('2d');
+            const font = `900 ${p.size}px "Dela Gothic One", "Zen Maru Gothic", sans-serif`;
+            m.font = font;
+            const tw = Math.ceil(m.measureText(p.str).width);
+            const pad = Math.ceil(p.size * 0.45);
+            const w = tw + pad * 2; const h = Math.ceil(p.size * 1.4) + pad * 2;
+            cv.width = Math.max(2, Math.ceil(w * k2)); cv.height = Math.max(2, Math.ceil(h * k2));
+            m.scale(k2, k2); m.translate(w / 2, h / 2);
+            m.font = font; m.textAlign = 'center'; m.textBaseline = 'middle';
+            m.lineWidth = p.size * 0.28; m.lineJoin = 'round'; m.strokeStyle = INK; m.strokeText(p.str, 0, 0);
+            m.fillStyle = p.color; m.fillText(p.str, 0, 0);
+            p._spr = { cv, w, h };
+          }
           const pop = k < 0.12 ? 0.6 + (k / 0.12) * 0.5 : k < 0.2 ? 1.1 - ((k - 0.12) / 0.08) * 0.1 : 1;
-          c.setTransform(dpr * pop, 0, 0, dpr * pop, p.x * dpr, p.y * dpr);
-          c.globalAlpha = fade;
-          c.font = `900 ${p.size}px "Dela Gothic One", "Zen Maru Gothic", sans-serif`;
-          c.textAlign = 'center'; c.textBaseline = 'middle';
-          c.lineWidth = p.size * 0.28; c.lineJoin = 'round'; c.strokeStyle = INK; c.strokeText(p.str, 0, 0);
-          c.fillStyle = p.color; c.fillText(p.str, 0, 0);
+          this.stamp(p._spr, p.x, p.y, 0, pop, pop, fade);
           break;
         }
         case 'puff': {

@@ -1,4 +1,4 @@
-const CACHE = 'dopa-drill-v1';
+const CACHE = 'dopa-drill-v2';
 const ASSETS = [
   './',
   './index.html',

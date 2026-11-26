@@ -40,8 +40,9 @@ function fitWidth(el, max = innerWidth * 0.92) {
 const capture = params.has('capture');
 const EXTRA_MS = Number(params.get('extra') || 90) * 1000;
 const audio = new AudioEngine({ capture });
-const fx = new FX($('#fx'), 300);
-const fxBack = new FX($('#fx-back'), 520);
+const tabletLike = matchMedia('(pointer: coarse)').matches && innerWidth * innerHeight > 500000;
+const fx = new FX($('#fx'), tabletLike ? 220 : 300);
+const fxBack = new FX($('#fx-back'), tabletLike ? 340 : 520);
 const bg = new Backdrop($('#bg'), $('#rays-fallback'));
 const backLayer = $('#actors-back');
 const frontLayer = $('#actors-front');
@@ -49,12 +50,33 @@ const hero = new Dopakichi(backLayer, { scale: 0.72, front: frontLayer });
 const actors = [hero];
 const crowd = [];
 const body = document.body;
+const playScreen = $('#screen-play');
+const hudEl = $('.hud');
+const clockEl = $('.clock');
+const clockTextEl = $('#clock');
+const clockLabelEl = $('#clock-label');
+const dopaEl = $('#dopa');
+const flashEl = $('#flash');
+const comboBoxEl = $('#combo-box');
+const comboBarEl = $('#combo-bar');
 const sheet = $('#sheet');
 const card = $('#card');
 // A two-line hint makes the card taller; Dopakichi steps up with it instead of covering the title.
 new ResizeObserver(() => { if (S.screen === 'play') layoutActors(); }).observe(card);
 const stage = $('#stage');
 const padButtons = Object.fromEntries($$('#pad button').map((b) => [b.dataset.key, b]));
+const METRICS = { stage: null, target: null };
+let lastClockText = '', lastKickStr = '', lastFlashStr = '', lastShaking = false, lastOver = false, lastHurry = false;
+function refreshTargetMetric() {
+  const el = S.problem && S.problem.steps[S.step] ? S.cells[S.problem.steps[S.step].cell] : null;
+  METRICS.target = el ? centerOf(el) : null;
+}
+function refreshPlayMetrics() {
+  if (S.screen !== 'play') return;
+  const r = stage.getBoundingClientRect();
+  if (r.width && r.height) METRICS.stage = { cx: r.left + r.width / 2, cy: r.top + r.height * 0.55 };
+  refreshTargetMetric();
+}
 
 const S = {
   screen: 'title', N: 10, rng: null, qi: 0, problems: [], problem: null, step: 0,
@@ -135,6 +157,7 @@ function layoutActors() {
   hero.place(x, y);
   hero.lift = 0; hero.rot = 0;
   crowd.forEach((c, i) => placeCrowd(c, i));
+  refreshPlayMetrics();
 }
 
 // ---------------------------------------------------------------- problems
@@ -337,6 +360,7 @@ function activate(k) {
   $$('.cell.hint-glow').forEach((c) => c.classList.remove('hint-glow'));
   $('#step-label').innerHTML = `<b>${st.label}</b>${st.hint ? `&ensp;${st.hint}` : ''}`;
   if (k === p.steps.length - 1 && k > 0 && S.E >= 0.45 && !S.reach) startReach();
+  refreshTargetMetric();
 }
 
 // ---------------------------------------------------------------- flow
@@ -359,8 +383,9 @@ function startGame(kind = 'level', arg) {
   S.dopa = { L: 0, shown: 0, unit: '' };
   S.extra = { score: 0, solved: 0, misses: 0, end: 0, over: false };
   S.targetMs = Math.ceil((S.N * 18) / 10) * 10 * 1000;
-  $('#clock-label').textContent = `Цель ${fmtTime(S.targetMs)}`;
-  $('.clock').classList.remove('over', 'extra', 'hurry');
+  clockLabelEl.textContent = `Цель ${fmtTime(S.targetMs)}`;
+  clockEl.classList.remove('over', 'extra', 'hurry');
+  lastOver = false; lastHurry = false; lastClockText = '';
   $('#ok-total').textContent = `/${S.N}`;
   const pips = $('#pips');
   pips.innerHTML = '';
@@ -987,9 +1012,8 @@ function tickCombo(t) {
   if (!S.ready) { S.comboEnd = t + Math.max(left, 0); return; }
   if (left <= 0) { breakCombo(true); return; }
   const k = clamp(left / S.comboLimit);
-  const bar = $('#combo-bar');
-  bar.style.transform = `scaleX(${k.toFixed(3)})`;
-  $('#combo-box').classList.toggle('hurry', k < 0.3);
+  comboBarEl.style.transform = `scaleX(${k.toFixed(3)})`;
+  comboBoxEl.classList.toggle('hurry', k < 0.3);
 }
 
 // Floating "+N очков" above the card when an extra problem is cleared.
@@ -1270,8 +1294,9 @@ function startExtra() {
   questNote({ type: 'extra' });
   S.combo = 0;
   showCombo();
-  $('.clock').classList.add('extra');
-  $('#clock-label').textContent = 'Осталось';
+  clockEl.classList.add('extra');
+  clockLabelEl.textContent = 'Осталось';
+  lastOver = false; lastHurry = false; lastClockText = '';
   $('#ok-total').textContent = '';
   updateTally();
   audio.play('musicGain', audio.now(), { v: 0.8, ramp: 0.2 });
@@ -1539,7 +1564,6 @@ function toTitle() {
 }
 
 // ---------------------------------------------------------------- frame loop
-let lastClockText = '';
 onFrame((dt, t) => {
   audio.update();
   demoTick(t);
@@ -1547,13 +1571,17 @@ onFrame((dt, t) => {
   const pulse = audio.pulse();
   const targetKick = audio.playing ? pulse.kick * (S.level >= 1 ? 1 : 0.2) : 0;
   S.kick = S.reduced ? 0 : targetKick;
-  body.style.setProperty('--kick', S.kick.toFixed(3));
+  const kickStr = S.screen === 'play' ? S.kick.toFixed(2) : '0.00';
+  if (kickStr !== lastKickStr) {
+    playScreen.style.setProperty('--kick', kickStr);
+    lastKickStr = kickStr;
+  }
 
   // dopa counter rolls in log space
   const d = S.dopa;
   if (d.shown < d.L) {
     d.shown = Math.min(d.L, d.shown + Math.max(0.02, (d.L - d.shown) * Math.min(1, dt * 7)));
-    $('#dopa').textContent = fmtDopa(d.shown);
+    dopaEl.textContent = fmtDopa(d.shown);
     const u = unitOf(d.shown);
     if (u !== d.unit) { if (u) unitSlam(u, d.shown); d.unit = u; }
   }
@@ -1564,7 +1592,8 @@ onFrame((dt, t) => {
     if (S.mode === 'extra') {
       const left = Math.max(0, S.extra.end - t);
       txt = fmtTime(left + 999);
-      $('.clock').classList.toggle('hurry', left < 10000);
+      const hurry = left < 10000;
+      if (hurry !== lastHurry) { clockEl.classList.toggle('hurry', hurry); lastHurry = hurry; }
       if (left < 5500 && left > 0) {
         const sec = Math.ceil(left / 1000);
         if (sec !== S.lastTick) { S.lastTick = sec; audio.tick(sec <= 1); }
@@ -1573,10 +1602,14 @@ onFrame((dt, t) => {
     } else {
       const el = (S.endT || t) - S.startT;
       txt = fmtTime(el);
-      $('.clock').classList.toggle('over', el > S.targetMs);
-      if (el > S.targetMs) $('#clock-label').textContent = 'Дольше цели';
+      const over = el > S.targetMs;
+      if (over !== lastOver) {
+        clockEl.classList.toggle('over', over);
+        if (over) clockLabelEl.textContent = 'Дольше цели';
+        lastOver = over;
+      }
     }
-    if (txt !== lastClockText) { $('#clock').textContent = txt; lastClockText = txt; }
+    if (txt !== lastClockText) { clockTextEl.textContent = txt; lastClockText = txt; }
 
     // Hero wanders around the stage between actions.
     if (!S.reduced && S.motion >= 0.35 && S.E > 0.3 && t > S.idleAt && t > S.busyUntil && !S.reach && !hero.hands.some((h) => h.job)) {
@@ -1585,20 +1618,27 @@ onFrame((dt, t) => {
       const x = clamp(r.left + r.width / 2 + rand(-0.28, 0.28) * r.width, r.left + 50, r.right - 50);
       hero.hop(20 + 40 * S.E, 420, { to: { x, y: hero.home.y }, spin: S.E > 0.6 && chance(0.3) ? 360 : 0 }).then((ok) => { if (ok) hero.x = x; });
     }
-    const target = S.problem && S.problem.steps[S.step] ? S.cells[S.problem.steps[S.step].cell] : null;
-    if (target && !hero.hands.some((h) => h.job)) hero.lookAt(centerOf(target));
+    if (METRICS.target && !hero.hands.some((h) => h.job)) hero.lookAt(METRICS.target);
   }
 
   // screen shake (keypad stays still to keep tap targets stable)
   S.shake = Math.max(0, S.shake - dt * 30);
   const shk = S.shake * S.motion;
-  const sx = shk > 0.1 && !S.reduced ? rand(-shk, shk) : 0;
-  const sy = shk > 0.1 && !S.reduced ? rand(-shk, shk) : 0;
-  const tr = shk > 0.1 ? `translate(${sx}px, ${sy}px)` : '';
-  stage.style.translate = tr ? `${sx}px ${sy}px` : '';
-  $('.hud').style.translate = tr ? `${sx * 0.5}px ${sy * 0.5}px` : '';
+  const shaking = shk > 0.1 && !S.reduced;
+  if (shaking) {
+    const sx = rand(-shk, shk);
+    const sy = rand(-shk, shk);
+    stage.style.translate = `${sx}px ${sy}px`;
+    hudEl.style.translate = `${sx * 0.5}px ${sy * 0.5}px`;
+    lastShaking = true;
+  } else if (lastShaking) {
+    stage.style.translate = '';
+    hudEl.style.translate = '';
+    lastShaking = false;
+  }
   S.flash = Math.max(0, S.flash - dt * 3.2);
-  $('#flash').style.opacity = S.reduced ? 0 : ((S.flash * S.motion) ** 1.5 * 0.6).toFixed(3);
+  const flashStr = S.reduced ? '0' : ((S.flash * S.motion) ** 1.5 * 0.6).toFixed(3);
+  if (flashStr !== lastFlashStr) { flashEl.style.opacity = flashStr; lastFlashStr = flashStr; }
 
   // backdrop
   const vE = S.settingsOpen || S.screen === 'collect' ? S.previewE : (S.screen === 'title' || S.screen === 'tree' || S.screen === 'trophy') ? 0.04 : lerp(Math.min(S.E, 0.3), S.E, S.motion);
@@ -1610,8 +1650,10 @@ onFrame((dt, t) => {
   st.reach = lerp(st.reach, S.reach ? 1 : 0, Math.min(1, dt * 5));
   st.hue += dt * 0.03 * S.visualE;
   const hc = hero.headCenter;
-  st.cx = lerp(st.cx || hc.x, S.screen === 'play' ? stage.getBoundingClientRect().left + stage.clientWidth / 2 : innerWidth / 2, Math.min(1, dt * 3));
-  st.cy = lerp(st.cy || hc.y, S.screen === 'play' ? stage.getBoundingClientRect().top + stage.clientHeight * 0.55 : innerHeight * 0.4, Math.min(1, dt * 3));
+  const goalX = S.screen === 'play' && METRICS.stage ? METRICS.stage.cx : innerWidth / 2;
+  const goalY = S.screen === 'play' && METRICS.stage ? METRICS.stage.cy : innerHeight * 0.4;
+  st.cx = lerp(st.cx || hc.x, goalX, Math.min(1, dt * 3));
+  st.cy = lerp(st.cy || hc.y, goalY, Math.min(1, dt * 3));
   bg.render(t);
   fx.update(dt);
   fx.draw();
@@ -2673,7 +2715,7 @@ addEventListener('resize', () => requestAnimationFrame(() => {
   $('#logo-burst-path').setAttribute('d', star(96, 66, 14, 0.14, 7));
   $('#logo-burst-inner').setAttribute('d', star(70, 52, 14, 0.1, 3));
   const burst = $('.logo-burst');
-  onFrame((dt, t) => { if (S.screen === 'title' && !S.reduced) burst.style.setProperty('--spin', (t / 1000 * 10 * (0.3 + S.motion)) % 360); });
+  onFrame((dt, t) => { if (S.screen === 'title' && !S.reduced && !S.guideOpen && !S.settingsOpen && !S.bonusOpen && !S.trophyOpen && !S.confirm) burst.style.setProperty('--spin', (t / 1000 * 10 * (0.3 + S.motion)) % 360); });
 })();
 
 const saved = store.settings();

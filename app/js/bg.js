@@ -210,6 +210,7 @@ export class Backdrop {
     this.canvas = canvas;
     this.fallback = fallback;
     this.state = { E: 0, kick: 0, flash: 0, reach: 0, hue: 0, cx: 0, cy: 0, theme: 0 };
+    this._drawn = false;
     this.gl = null;
     try { this.init(); } catch (e) { console.warn('webgl off', e); this.gl = null; }
     if (!this.gl) { canvas.style.display = 'none'; fallback.style.display = 'block'; }
@@ -236,7 +237,8 @@ export class Backdrop {
     this.canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.gl = null; this.canvas.style.display = 'none'; this.fallback.style.display = 'block'; });
   }
   resize() {
-    const dpr = Math.min(1.25, window.devicePixelRatio || 1);
+    const maxDpr = Math.sqrt(420000 / Math.max(1, innerWidth * innerHeight));
+    const dpr = Math.max(0.5, Math.min(1.25, window.devicePixelRatio || 1, maxDpr));
     const w = Math.round(innerWidth * dpr); const h = Math.round(innerHeight * dpr);
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
     this.dpr = dpr;
@@ -249,13 +251,28 @@ export class Backdrop {
   }
   render(t) {
     const s = this.state;
+    const visible = s.E > 0.1 || s.reach > 0.001 || s.flash > 0.001;
     if (!this.gl) {
       const f = this.fallback;
+      if (!visible) {
+        if (this._drawn) { f.style.opacity = '0'; this._drawn = false; }
+        return;
+      }
+      this._drawn = true;
       f.style.opacity = String(Math.min(1, Math.max(s.reach * 0.8, (s.E - 0.12) * 2)));
       f.style.transform = `rotate(${(t / 1000) * (8 + 40 * s.E)}deg) scale(${1 + s.kick * 0.04})`;
       f.style.filter = s.E > 0.6 ? `hue-rotate(${(t / 20) % 360}deg)` : 'none';
       return;
     }
+    if (!visible) {
+      if (this._drawn) {
+        this.gl.clearColor(0, 0, 0, 0);
+        this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+        this._drawn = false;
+      }
+      return;
+    }
+    this._drawn = true;
     this.resize();
     const gl = this.gl;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
